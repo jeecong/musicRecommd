@@ -1,0 +1,82 @@
+import multiprocessing
+import gensim
+import sys
+from random import shuffle
+
+import redis
+
+from train.KNNTrain import name_id_dict
+
+
+def parse_playlist_get_sequence(playlist_song,):
+	playlist_sequence=[]
+	# song_sequence = []
+	# contents =str(in_line, 'utf-8').strip().split("\t")
+	# # 解析歌单序列
+	# for song in contents[1:]:
+	# 	try:
+	# 		song_id, song_name, artist, popularity = song.split(":::")
+	# 		song_sequence.append(song_id)
+	# 	except:
+	# 		pass
+	# 		# print ("song format error")
+	# 		# print (song+"\n")
+	for song_sequence in playlist_song:
+		for i in range(len(playlist_song[song_sequence])):
+			shuffle(list(playlist_song[song_sequence]))
+		playlist_sequence.append(playlist_song[song_sequence])
+	return playlist_sequence
+
+
+def train_song2vec(playlist_sequence):
+	#使用word2vec训练
+	cores = multiprocessing.cpu_count()
+	print ("using all "+str(cores)+" cores")
+	print ("Training word2vec model...")
+	model = gensim.models.Word2Vec(sentences=playlist_sequence, size=150, min_count=2, window=7, workers=cores)
+	print ("Saving model...")
+	model.save("song_word2vec.model")
+	return model
+
+def predict_similarity(model,playlist_song):
+	playlist_id_name_dic, song_id_name_dic, playlist_name_id_dic, song_name_id_dic=name_id_dict.getpickle()
+	print("开始执行predict")
+	for item in playlist_song:
+		# print(playlist_song[item])
+		for i in playlist_song[item]:
+
+			print("和歌曲 id："+i+","+song_id_name_dic[i]+"相似的:")
+			try:
+				result_song_list=model.most_similar(i,topn=20)
+				save_redis(i,result_song_list)
+				# for song in result_song_list:
+				# 	print("\t", song_id_name_dic[song[0]], song[1])
+			except:
+				print(i+"的频次少于3")
+	# result_song_list=model.most_similar("419485281")
+	# print(result_song_list)
+def save_redis(id,songlist):
+	pool = redis.ConnectionPool(host='120.77.254.189', password='foobared')  # 实现一个连接池
+	r = redis.Redis(connection_pool=pool)
+	key="SONG::"+id
+	value=[]
+	for item in songlist:
+		value.append(int(item[0]))
+	print(key,str(value).strip("'"))
+	r.set(key,str(value).strip("'"))
+
+
+
+def main():
+	playlist_song = name_id_dict.getplaylist_song()
+	# playlist_sequence=parse_playlist_get_sequence(playlist_song)
+	# model=train_song2vec(playlist_sequence)
+	model_str = "./song_word2vec.model"
+	model = gensim.models.Word2Vec.load(model_str)
+	print("获得model。。。。")
+	predict_similarity(model,playlist_song)
+if __name__ == '__main__':
+#入口
+    main()
+
+
